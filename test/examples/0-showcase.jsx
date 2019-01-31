@@ -11,39 +11,43 @@ function uuid() {
     })
 }
 
+/*
+
+<GridLayout
+  id="nested-layout"
+  key={4}
+  nested
+  cols={12}
+  width={props.width}
+  onLayoutChange={this.handleLayoutChange('nested-layout')}
+  onMoveToParent={this.onMoveToParent}
+  onMoveFromParent={this.onMoveFromParent}
+  measureBeforeMount={true}
+  useCSSTransforms={true}
+  compactType="vertical"
+  preventCollision={false}
+  onDragStart={(layout, oldItem, newItem, placeholder, e) => {
+      e.stopPropagation()
+  }}
+>
+
+</GridLayout>
+
+ */
+
 class ShowcaseLayout extends React.Component {
   constructor(props) {
     super(props)
 
     this.state.layout = [
-      <div key={1} data-grid={{i: '1', x: 0, y: 0, w: 6, h: 2}}>1</div>,
-      <div key={2} data-grid={{i: '2', x: 6, y: 0, w: 6, h: 2}}>2</div>,
-      <div key="nested-layout" data-grid={{i: 'nested-layout', x: 0, y: 2, w: 12, h: 4, nested: true, isResizable: false}}>
-        <GridLayout
-          id="nested-layout"
-          key={4}
-          nested
-          cols={12}
-          width={props.width}
-          // TODO apply layout changes for nested grids
-          // TODO calculate grid height based on the items
-          // onLayoutChange={this.onLayoutChange}
-          onMoveToParent={this.onMoveToParent}
-          onMoveFromParent={this.onMoveFromParent}
-          measureBeforeMount={true}
-          useCSSTransforms={true}
-          compactType="vertical"
-          preventCollision={false}
-          onDragStart={(layout, oldItem, newItem, placeholder, e) => {
-              e.stopPropagation()
-          }}
-        >
-          <div key={5} data-grid={{i: '5', x: 6, y: 0, w: 6, h: 2}}>5</div>
-          <div key={6} data-grid={{i: '6', x: 0, y: 0, w: 6, h: 2}}>6</div>
-          <div key={7} data-grid={{i: '7', x: 6, y: 2, w: 6, h: 2}}>7</div>
-          <div key={8} data-grid={{i: '8', x: 0, y: 2, w: 6, h: 2}}>8</div>
-        </GridLayout>
-      </div>
+      {i: '1', x: 0, y: 0, w: 6, h: 2},
+      {i: '2', x: 6, y: 0, w: 6, h: 2},
+      {i: 'nested-layout', x: 0, y: 2, w: 12, h: 4, nested: true, isResizable: false, items: [
+        {i: '5', x: 6, y: 0, w: 6, h: 2},
+        {i: '6', x: 0, y: 0, w: 6, h: 2},
+        {i: '7', x: 6, y: 2, w: 6, h: 2},
+        {i: '8', x: 0, y: 2, w: 6, h: 2}
+      ]}
     ]
   }
 
@@ -58,41 +62,76 @@ class ShowcaseLayout extends React.Component {
     currentBreakpoint: "lg",
     compactType: "vertical",
     mounted: false,
-    layout: []
+    layout: [],
+    shiftKeyPressed: false
   };
 
   onMoveToParent = (gridItem, nestedId) => {
     const { layout } = this.state
     const key = uuid()
 
-    const nestedItemIndex = layout.findIndex(item => item.props['data-grid'].i === nestedId)
+    const nestedItemIndex = layout.findIndex(item => item.i === nestedId)
     const nestedItem = layout[nestedItemIndex]
-    const nestedGrid = React.Children.only(nestedItem.props.children)
-    const indexToRemove = nestedGrid.props.children.findIndex(item => item.props['data-grid'].i === gridItem.i)
-    const nestedGridChildren = [...React.Children.toArray(nestedGrid.props.children)]
-    nestedGridChildren.splice(indexToRemove, 1)
+    const nestedGrid = nestedItem.items
 
-    const newNewstedItem = React.cloneElement(
-      nestedItem,
-      {},
-      React.cloneElement(
-        nestedGrid,
-        {},
-        nestedGridChildren
-      )
-    )
-    layout[nestedItemIndex] = newNewstedItem
-    layout.push(<div key={key} data-grid={gridItem}>{key}</div>)
+    // remove item from nested grid
+    const indexToRemove = nestedGrid.findIndex(item => item.i === gridItem.i)
+    nestedGrid.splice(indexToRemove, 1)
+
+    // insert item into parent grid
+    layout[nestedItemIndex].items = nestedGrid
+    layout.push({
+      ...gridItem,
+      i: key
+    })
 
     this.setState({ layout })
   }
 
-  onMoveFromParent = gridItem => { // eslint-disable-line
-    // TODO
+  onMoveFromParent = (gridItem, nestedId) => {
+    const { layout } = this.state
+    const key = uuid()
+
+    const nestedItemIndex = layout.findIndex(item => item.i === nestedId)
+    const nestedItem = layout[nestedItemIndex]
+    const nestedGrid = nestedItem.items
+
+    // insert element to nested grid
+    nestedGrid.push({
+      ...gridItem,
+      i: key
+    })
+    layout[nestedItemIndex].items = nestedGrid
+
+    // remove item from parent grid
+    const indexToRemove = layout.findIndex(item => item.i === gridItem.i)
+    layout.splice(indexToRemove, 1)
+
+    this.setState({ layout })
   }
 
   componentDidMount() {
     this.setState({ mounted: true });
+
+    window.addEventListener('mousemove', e => this.handleShiftKeyPress(e))
+    window.addEventListener('keydown', e => this.handleShiftKeyPress(e))
+    window.addEventListener('keyup', e => this.handleShiftKeyPress(e))
+  }
+
+  handleShiftKeyPress = e => {
+    const { shiftKeyPressed } = this.state
+
+    if (!e) {
+      e = window.event
+    }
+
+    window.shiftKeyPressed = !!e.shiftKey // TODO pass this through props chain or from global state
+
+    if (e.shiftKey && !shiftKeyPressed) {
+      this.setState({ shiftKeyPressed: true })
+    } else if (!e.shiftKey && shiftKeyPressed) {
+      this.setState({ shiftKeyPressed: false })
+    }
   }
 
   generateDOM() {
@@ -129,23 +168,39 @@ class ShowcaseLayout extends React.Component {
     this.setState({ compactType });
   };
 
-  onLayoutChange = newLayout => {
-    const { layout: oldLayout } = this.state
-    const layout = []
+  handleLayoutChange = nestedId => newLayout => {
+    let { layout: oldLayout } = this.state
+    let nestedItemIndex = null
+    let nestedItem = null
+    let parentLayout = []
 
-    newLayout.forEach((item, index) => {
-      const oldItem = oldLayout[index]
-      layout.push(React.cloneElement(
-        oldItem,
-        {
-          'data-grid': item
-        },
-        oldItem.props.children
-      ))
+    if (nestedId) {
+      nestedItemIndex = oldLayout.findIndex(item => item.i === nestedId)
+      nestedItem = oldLayout[nestedItemIndex]
+      parentLayout = oldLayout
+      oldLayout = nestedItem.items
+    }
+
+    const layout = newLayout.map((item, index) => {
+        const oldItem = oldLayout[index]
+
+        if (oldItem && oldItem.i === item.i) {
+            return {
+                ...oldItem,
+                ...item
+            }
+        }
+
+        return item
     })
 
-    this.setState({ layout })
-  };
+    if (nestedId) {
+      parentLayout[nestedItemIndex].items = layout
+      this.setState({ layout: parentLayout })
+    } else {
+      this.setState({ layout })
+    }
+  }
 
   onNewLayout = () => {
     this.setState({
@@ -155,10 +210,11 @@ class ShowcaseLayout extends React.Component {
 
   render() {
     const { width } = this.props
-    const { layout, mounted } = this.state
+    const { layout, mounted, shiftKeyPressed } = this.state
 
     return (
       <div>
+        {shiftKeyPressed && <div>Shift: { shiftKeyPressed.toString() }</div>}
         <div>
           Current Breakpoint: {this.state.currentBreakpoint} ({
             this.props.cols[this.state.currentBreakpoint]
@@ -178,15 +234,44 @@ class ShowcaseLayout extends React.Component {
           mounted={mounted}
           cols={12}
           width={width}
-          onLayoutChange={this.onLayoutChange}
+          onLayoutChange={this.handleLayoutChange()}
           measureBeforeMount={true}
           useCSSTransforms={true}
           compactType={this.state.compactType}
           preventCollision={!this.state.compactType}
           onMoveToParent={this.onMoveToParent}
           onMoveFromParent={this.onMoveFromParent}
+          shiftKeyPressed={shiftKeyPressed}
         >
-          {layout.map(item => item)}
+          {layout.map(item => {
+            if (item.nested && item.items && item.items.length) {
+              return (
+                <div key={item.i} data-grid={item}>
+                  <GridLayout
+                    id={item.i}
+                    key={4}
+                    nested
+                    cols={12}
+                    width={width}
+                    onLayoutChange={this.handleLayoutChange(item.i)}
+                    onMoveToParent={this.onMoveToParent}
+                    onMoveFromParent={this.onMoveFromParent}
+                    measureBeforeMount={true}
+                    useCSSTransforms={true}
+                    compactType="vertical"
+                    preventCollision={false}
+                    onDragStart={(layout, oldItem, newItem, placeholder, e) => {
+                        e.stopPropagation()
+                    }}
+                  >
+                    {item.items.map(nestedItem => <div key={nestedItem.i} data-grid={nestedItem}>{nestedItem.i}</div>)}
+                  </GridLayout>
+                </div>
+              )
+            } else {
+              return <div key={item.i} data-grid={item}>{item.i}</div>
+            }
+          })}
         </GridLayout>
       </div>
     );

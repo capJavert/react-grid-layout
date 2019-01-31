@@ -14,6 +14,7 @@ import {
   synchronizeLayoutWithChildren,
   validateLayout,
   getAllCollisions,
+  sortLayoutItems,
   noop
 } from "./utils";
 import GridItem from "./GridItem";
@@ -74,6 +75,9 @@ export type Props = {
   children: ReactChildrenArray<ReactElement<any>>,
   onMoveToParent: Function,
   onMoveFromParent: Function,
+
+  // Key modifiers
+  shiftKeyPressed: boolean
 };
 // End Types
 
@@ -190,6 +194,11 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     onMoveFromParent: PropTypes.func,
 
     //
+    // Key modifiers
+    //
+    shiftKeyPressed: PropTypes.bool, // TODO use this prop instead of window.shiftKeyPressed
+
+    //
     // Other validations
     //
 
@@ -273,8 +282,8 @@ export default class ReactGridLayout extends React.Component<Props, State> {
   }
 
   itemRefs = {}
-  itemObservers = {}
   observer = null
+  dragItemIntersecting = true
 
   componentDidMount() {
     const { id, nested } = this.props
@@ -299,39 +308,22 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     }
   }
 
-  intersectionCallback = (entries, observer) => {
-    const { id, nested } = this.props
-    const { layout, oldDragItem } = this.state
-
-    if (!oldDragItem || !nested) {
-      return
-    }
-
-    const key = oldDragItem.i
-
+  intersectionCallback = (entries/*, observer*/) => {
     entries.forEach(entry => {
-      if (!entry.isIntersecting) {
-        const gridItem = getLayoutItem(layout, key)
-
-        if (!gridItem) {
-          return
-        }
-
-        const { i, x, y } = gridItem
-        this.onDragStop(i, x, y, { e: {}, node: gridItem }: GridDragEvent)
-        this.onMoveToParent(gridItem, id)
-        // delete this.itemObservers[i]
-        delete this.itemRefs[i]
-
-        // reconenct all observers because items are remounted
-        // TODO find a better way to preserve refs across remounts
-        observer.disconnect()
-
-        Object.keys(this.itemRefs).forEach(key => {
-          observer.observe(this.itemRefs[key].current)
-        })
-      }
+      this.dragItemIntersecting = entry.isIntersecting
     })
+  }
+
+  componentDidUpdate = prevProps => {
+    const { children } = this.props
+
+    if (React.Children.count(children) !== React.Children.count(prevProps.children)) {
+      this.observer.disconnect()
+
+      Object.keys(this.itemRefs).forEach(key => {
+        this.observer.observe(this.itemRefs[key].current)
+      })
+    }
   }
 
   UNSAFE_componentWillReceiveProps(nextProps: Props) {
@@ -414,6 +406,9 @@ export default class ReactGridLayout extends React.Component<Props, State> {
    * @param {Element} node The current dragging DOM element
    */
   onDragStart(i: string, x: number, y: number, { e, node }: GridDragEvent) {
+    // invalidate last drag item intersection status
+    this.dragItemIntersecting = true
+
     const { layout } = this.state;
     var l = getLayoutItem(layout, i);
     if (!l) return;
@@ -483,22 +478,50 @@ export default class ReactGridLayout extends React.Component<Props, State> {
   onDragStop(i: string, x: number, y: number, { e, node }: GridDragEvent) {
     const { oldDragItem } = this.state;
     let { layout } = this.state;
-    const { cols, preventCollision } = this.props;
+    const { cols, preventCollision, nested, id } = this.props;
     const l = getLayoutItem(layout, i);
     if (!l) return;
 
-    // Move the element here
-    const isUserAction = true;
-    layout = moveElement(
-      layout,
-      l,
-      x,
-      y,
-      isUserAction,
-      preventCollision,
-      this.compactType(),
-      cols
-    );
+    if (window.shiftKeyPressed && !nested) {
+      // shift key is pressed check if item should go to nested grid
+      const sorted = sortLayoutItems(layout, this.compactType());
+      const collisions = getAllCollisions(sorted, node);
+
+      const nestedCollision = collisions.find(item => item.nested)
+
+      if (nestedCollision) {
+        const removeIndex = layout.findIndex(item => item.i === l.i)
+        layout.splice(removeIndex, 1)
+        this.onMoveFromParent(l, nestedCollision.i)
+      }
+    } else if (!this.dragItemIntersecting) {
+      const removeIndex = layout.findIndex(item => item.i === l.i)
+      layout.splice(removeIndex, 1)
+
+      this.onMoveToParent(l, id)
+      delete this.itemRefs[i]
+
+      // reconenct all observers because items are remounted
+      // TODO find a better way to preserve refs across remounts
+      this.observer.disconnect()
+
+      Object.keys(this.itemRefs).forEach(key => {
+        this.observer.observe(this.itemRefs[key].current)
+      })
+    } else {
+      // Move the element here
+      const isUserAction = true;
+      layout = moveElement(
+        layout,
+        l,
+        x,
+        y,
+        isUserAction,
+        preventCollision,
+        this.compactType(),
+        cols
+      );
+    }
 
     this.props.onDragStop(layout, oldDragItem, l, null, e, node);
 
@@ -676,6 +699,31 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     if (!child || !child.key) return;
     const l = getLayoutItem(this.state.layout, String(child.key));
     if (!l) return null;
+
+    const { nested } = this.props
+    // If container grid is not nested and item has nested grid
+    if (!nested && l.nested) {
+      const nestedGrid = React.Children.only(child.props.children)
+      const nestedLayout = React.Children.map(nestedGrid.props.children, item => ({
+        ...item.props['data-grid']
+      }))
+
+      let nestedHeight = null
+      if (nestedGrid.props.autoSize) {
+        const nbRow = bottom(nestedLayout);
+        const containerPaddingY = nestedGrid.props.containerPadding
+          ? nestedGrid.props.containerPadding[1]
+          : nestedGrid.props.margin[1];
+        nestedHeight = Math.floor((
+          nbRow * nestedGrid.props.rowHeight +
+          (nbRow - 1) * nestedGrid.props.margin[1] +
+          containerPaddingY * 2
+        ) / (nestedGrid.props.rowHeight || ReactGridLayout.defaultProps.rowHeight))
+      }
+
+      l.h = nestedHeight
+    }
+
     const {
       width,
       cols,
