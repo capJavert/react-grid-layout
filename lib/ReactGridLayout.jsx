@@ -42,6 +42,7 @@ type State = {
 };
 
 export type Props = {
+  id: string,
   className: string,
   style: Object,
   width: number,
@@ -60,6 +61,7 @@ export type Props = {
   isResizable: boolean,
   preventCollision: boolean,
   useCSSTransforms: boolean,
+  nested: boolean,
 
   // Callbacks
   onLayoutChange: Layout => void,
@@ -69,7 +71,9 @@ export type Props = {
   onResize: EventCallback,
   onResizeStart: EventCallback,
   onResizeStop: EventCallback,
-  children: ReactChildrenArray<ReactElement<any>>
+  children: ReactChildrenArray<ReactElement<any>>,
+  onMoveToParent: Function,
+  onMoveFromParent: Function,
 };
 // End Types
 
@@ -85,6 +89,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     //
     // Basic props
     //
+    id: PropTypes.string,
     className: PropTypes.string,
     style: PropTypes.object,
 
@@ -97,6 +102,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     autoSize: PropTypes.bool,
     // # of cols.
     cols: PropTypes.number,
+    nested: PropTypes.bool,
 
     // A selector that will not be draggable.
     draggableCancel: PropTypes.string,
@@ -177,6 +183,13 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     onResizeStop: PropTypes.func,
 
     //
+    // Custom nested Callbacks
+    //
+
+    onMoveToParent: PropTypes.func,
+    onMoveFromParent: PropTypes.func,
+
+    //
     // Other validations
     //
 
@@ -251,16 +264,77 @@ export default class ReactGridLayout extends React.Component<Props, State> {
       "onResize",
       "onResizeStop"
     ]);
+
+    if (props.nested) {
+      React.Children.forEach(props.children, child => {
+        this.itemRefs[child.props['data-grid'].i] = React.createRef()
+      })
+    }
   }
 
+  itemRefs = {}
+  itemObservers = {}
+  observer = null
+
   componentDidMount() {
+    const { id, nested } = this.props
     this.setState({ mounted: true });
     // Possibly call back with layout on mount. This should be done after correcting the layout width
     // to ensure we don't rerender with the wrong width.
     this.onLayoutMaybeChanged(this.state.layout, this.props.layout);
+
+    // add observers to items
+    const options = {
+      root: document.getElementById(id),
+      rootMargin: '0px 0px 0px 0px',
+      threshold: 0.0
+    }
+
+    this.observer = new IntersectionObserver(this.intersectionCallback, options)
+
+    if (nested) {
+      Object.keys(this.itemRefs).forEach(key => {
+        this.observer.observe(this.itemRefs[key].current)
+      })
+    }
   }
 
-  componentWillReceiveProps(nextProps: Props) {
+  intersectionCallback = (entries, observer) => {
+    const { id, nested } = this.props
+    const { layout, oldDragItem } = this.state
+
+    if (!oldDragItem || !nested) {
+      return
+    }
+
+    const key = oldDragItem.i
+
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) {
+        const gridItem = getLayoutItem(layout, key)
+
+        if (!gridItem) {
+          return
+        }
+
+        const { i, x, y } = gridItem
+        this.onDragStop(i, x, y, { e: {}, node: gridItem }: GridDragEvent)
+        this.onMoveToParent(gridItem, id)
+        // delete this.itemObservers[i]
+        delete this.itemRefs[i]
+
+        // reconenct all observers because items are remounted
+        // TODO find a better way to preserve refs across remounts
+        observer.disconnect()
+
+        Object.keys(this.itemRefs).forEach(key => {
+          observer.observe(this.itemRefs[key].current)
+        })
+      }
+    })
+  }
+
+  UNSAFE_componentWillReceiveProps(nextProps: Props) {
     let newLayoutBase;
     // Legacy support for compactType
     // Allow parent to set layout directly.
@@ -285,6 +359,24 @@ export default class ReactGridLayout extends React.Component<Props, State> {
         this.compactType(nextProps)
       );
       const oldLayout = this.state.layout;
+
+      const { nested } = this.props
+      const newRefs = {}
+      if (nested) {
+        // add refs for new elements
+        newLayout.forEach(item => {
+          const existingRef = this.itemRefs[item.i]
+
+          if (!existingRef) {
+            newRefs[item.i] = React.createRef()
+          } else {
+            newRefs[item.i] = existingRef
+          }
+        })
+
+        this.itemRefs = newRefs
+      }
+
       this.setState({ layout: newLayout });
       this.onLayoutMaybeChanged(newLayout, oldLayout);
     }
@@ -559,6 +651,22 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     );
   }
 
+  onMoveToParent = (gridItem, nestedId) => {
+    const { onMoveToParent } = this.props
+
+    if (onMoveToParent) {
+      onMoveToParent(gridItem, nestedId)
+    }
+  }
+
+  onMoveFromParent = (gridItem, nestedId) => {
+    const { onMoveFromParent } = this.props
+
+    if (onMoveFromParent) {
+      onMoveFromParent(gridItem, nestedId)
+    }
+  }
+
   /**
    * Given a grid item, set its style attributes & surround in a <Draggable>.
    * @param  {Element} child React element.
@@ -622,13 +730,15 @@ export default class ReactGridLayout extends React.Component<Props, State> {
         maxW={l.maxW}
         static={l.static}
       >
-        {child}
+        <div ref={this.itemRefs[String(l.i)]}>
+          {child}
+        </div>
       </GridItem>
     );
   }
 
   render() {
-    const { className, style } = this.props;
+    const { id, className, style } = this.props;
 
     const mergedClassName = classNames("react-grid-layout", className);
     const mergedStyle = {
@@ -637,7 +747,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     };
 
     return (
-      <div className={mergedClassName} style={mergedStyle}>
+      <div id={id} className={mergedClassName} style={mergedStyle}>
         {React.Children.map(this.props.children, child =>
           this.processGridItem(child)
         )}

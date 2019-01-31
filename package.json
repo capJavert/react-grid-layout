@@ -12,8 +12,7 @@
     "dev": "make dev",
     "prepublishOnly": "make build",
     "validate": "npm ls",
-    "flow": "flow",
-    "precommit": "lint-staged && make lint"
+    "flow": "flow"
   },
   "repository": {
     "type": "git",
