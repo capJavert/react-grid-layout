@@ -1,7 +1,7 @@
 /* eslint-disable react/jsx-boolean-value */
 import React from "react";
-import _ from "lodash";
 import GridLayout, { WidthProvider } from "react-grid-layout";
+import { utils } from 'react-grid-layout'
 
 function uuid() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -11,29 +11,21 @@ function uuid() {
     })
 }
 
-/*
+const calculateHeight = (layout, padding, margin = [10, 10], rowHeight = 150) => {
+  const nbRow = utils.bottom(layout)
+  const containerPaddingY = padding
+    ? padding[1]
+    : margin[1]
 
-<GridLayout
-  id="nested-layout"
-  key={4}
-  nested
-  cols={12}
-  width={props.width}
-  onLayoutChange={this.handleLayoutChange('nested-layout')}
-  onMoveToParent={this.onMoveToParent}
-  onMoveFromParent={this.onMoveFromParent}
-  measureBeforeMount={true}
-  useCSSTransforms={true}
-  compactType="vertical"
-  preventCollision={false}
-  onDragStart={(layout, oldItem, newItem, placeholder, e) => {
-      e.stopPropagation()
-  }}
->
+  const nestedHeight = (
+    nbRow * rowHeight +
+    (nbRow - 1) * margin[1] +
+    containerPaddingY * 2
+  )
+  const nestedRow = Math.floor(nestedHeight / rowHeight)
 
-</GridLayout>
-
- */
+  return { nestedHeight, nestedRow }
+}
 
 class ShowcaseLayout extends React.Component {
   constructor(props) {
@@ -47,7 +39,11 @@ class ShowcaseLayout extends React.Component {
         {i: '6', x: 0, y: 0, w: 6, h: 2},
         {i: '7', x: 6, y: 2, w: 6, h: 2},
         {i: '8', x: 0, y: 2, w: 6, h: 2}
-      ]}
+      ]}/* ,
+      {i: '9', x: 0, y: 4, w: 6, h: 2},
+      {i: '10', x: 6, y: 4, w: 6, h: 2},
+      {i: '11', x: 0, y: 6, w: 6, h: 2},
+      {i: '12', x: 6, y: 6, w: 6, h: 2}, */
     ]
   }
 
@@ -85,7 +81,11 @@ class ShowcaseLayout extends React.Component {
       i: key
     })
 
-    this.setState({ layout })
+    if (!nestedGrid.length) {
+      layout.splice(nestedItemIndex, 1)
+    }
+
+    return nestedGrid
   }
 
   onMoveFromParent = (gridItem, nestedId) => {
@@ -107,7 +107,7 @@ class ShowcaseLayout extends React.Component {
     const indexToRemove = layout.findIndex(item => item.i === gridItem.i)
     layout.splice(indexToRemove, 1)
 
-    this.setState({ layout })
+    return layout
   }
 
   componentDidMount() {
@@ -134,25 +134,6 @@ class ShowcaseLayout extends React.Component {
     }
   }
 
-  generateDOM() {
-    return _.map(this.state.layouts.lg, function(l, i) {
-      return (
-        <div key={i} className={l.static ? "static" : ""}>
-          {l.static ? (
-            <span
-              className="text"
-              title="This item is static and cannot be removed or resized."
-            >
-              Static - {i}
-            </span>
-          ) : (
-            <span className="text">{i}</span>
-          )}
-        </div>
-      );
-    });
-  }
-
   onBreakpointChange = breakpoint => {
     this.setState({
       currentBreakpoint: breakpoint
@@ -169,44 +150,33 @@ class ShowcaseLayout extends React.Component {
   };
 
   handleLayoutChange = nestedId => newLayout => {
-    let { layout: oldLayout } = this.state
-    let nestedItemIndex = null
-    let nestedItem = null
-    let parentLayout = []
+    const { layout } = this.state
 
     if (nestedId) {
-      nestedItemIndex = oldLayout.findIndex(item => item.i === nestedId)
-      nestedItem = oldLayout[nestedItemIndex]
-      parentLayout = oldLayout
-      oldLayout = nestedItem.items
-    }
+      const nestedItemIndex = layout.findIndex(item => item.i === nestedId)
+      const { nestedHeight, nestedRow } = calculateHeight(newLayout)
 
-    const layout = newLayout.map((item, index) => {
-        const oldItem = oldLayout[index]
-
-        if (oldItem && oldItem.i === item.i) {
-            return {
-                ...oldItem,
-                ...item
-            }
+      if (nestedItemIndex !== -1) {
+        if (nestedHeight !== layout[nestedItemIndex].nestedHeight) {
+          // height changed set new identifier so parent grid know it needs to update
+          layout[nestedItemIndex].i = uuid()
         }
+        layout[nestedItemIndex].h = nestedRow
+        layout[nestedItemIndex].nestedHeight = nestedHeight
+        layout[nestedItemIndex].items = newLayout
+      }
 
-        return item
-    })
-
-    if (nestedId) {
-      parentLayout[nestedItemIndex].items = layout
-      this.setState({ layout: parentLayout })
-    } else {
       this.setState({ layout })
+    } else {
+      newLayout.forEach((item, index) => {
+        if (item.nested) {
+          item.items = layout[index].items
+        }
+      })
+      
+      this.setState({ layout: newLayout })
     }
   }
-
-  onNewLayout = () => {
-    this.setState({
-      layouts: { lg: generateLayout() }
-    });
-  };
 
   render() {
     const { width } = this.props
@@ -221,11 +191,6 @@ class ShowcaseLayout extends React.Component {
           }{" "}
           columns)
         </div>
-        <div>
-          Compaction type:{" "}
-          {_.capitalize(this.state.compactType) || "No Compaction"}
-        </div>
-        <button onClick={this.onNewLayout}>Generate New Layout</button>
         <button onClick={this.onCompactTypeChange}>
           Change Compaction Type
         </button>
@@ -244,13 +209,14 @@ class ShowcaseLayout extends React.Component {
           shiftKeyPressed={shiftKeyPressed}
         >
           {layout.map(item => {
-            if (item.nested && item.items && item.items.length) {
+            if (item.nested && item.items) {
               return (
                 <div key={item.i} data-grid={item}>
                   <GridLayout
                     id={item.i}
                     key={4}
                     nested
+                    height={item.nestedHeight}
                     cols={12}
                     width={width}
                     onLayoutChange={this.handleLayoutChange(item.i)}
@@ -279,20 +245,6 @@ class ShowcaseLayout extends React.Component {
 }
 
 module.exports = WidthProvider(ShowcaseLayout);
-
-function generateLayout() {
-  return _.map(_.range(0, 25), function(item, i) {
-    var y = Math.ceil(Math.random() * 4) + 1;
-    return {
-      x: (_.random(0, 5) * 2) % 12,
-      y: Math.floor(i / 6) * y,
-      w: 2,
-      h: y,
-      i: i.toString(),
-      static: Math.random() < 0.05
-    };
-  });
-}
 
 if (require.main === module) {
   require("../test-hook.jsx")(module.exports);

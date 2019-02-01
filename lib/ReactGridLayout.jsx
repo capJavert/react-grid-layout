@@ -47,6 +47,7 @@ export type Props = {
   className: string,
   style: Object,
   width: number,
+  height: number,
   autoSize: boolean,
   cols: number,
   draggableCancel: string,
@@ -101,6 +102,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     // be set to the container width. Note that resizes will *not* cause this to adjust.
     // If you need that behavior, use WidthProvider.
     width: PropTypes.number,
+    height: PropTypes.number,
 
     // If true, the container height swells and contracts to fit contents
     autoSize: PropTypes.bool,
@@ -276,7 +278,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     if (props.nested) {
       React.Children.forEach(props.children, child => {
-        this.itemRefs[child.props['data-grid'].i] = React.createRef()
+        this.itemRefs[child.key] = React.createRef()
       })
     }
   }
@@ -482,7 +484,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     const l = getLayoutItem(layout, i);
     if (!l) return;
 
-    if (window.shiftKeyPressed && !nested) {
+    if (window.shiftKeyPressed && !nested && !l.nested) {
       // shift key is pressed check if item should go to nested grid
       const sorted = sortLayoutItems(layout, this.compactType());
       const collisions = getAllCollisions(sorted, node);
@@ -490,24 +492,26 @@ export default class ReactGridLayout extends React.Component<Props, State> {
       const nestedCollision = collisions.find(item => item.nested)
 
       if (nestedCollision) {
-        const removeIndex = layout.findIndex(item => item.i === l.i)
-        layout.splice(removeIndex, 1)
-        this.onMoveFromParent(l, nestedCollision.i)
+        const movedLayout = this.onMoveFromParent(l, nestedCollision.i)
+        if (movedLayout) {
+          layout = movedLayout
+        }
       }
-    } else if (!this.dragItemIntersecting) {
-      const removeIndex = layout.findIndex(item => item.i === l.i)
-      layout.splice(removeIndex, 1)
+    } else if (window.shiftKeyPressed && !this.dragItemIntersecting && !l.nested) {
+      const movedLayout = this.onMoveToParent(l, id)
+      if (movedLayout) {
+        layout = movedLayout
 
-      this.onMoveToParent(l, id)
-      delete this.itemRefs[i]
+        delete this.itemRefs[i]
 
-      // reconenct all observers because items are remounted
-      // TODO find a better way to preserve refs across remounts
-      this.observer.disconnect()
+        // reconenct all observers because items are remounted
+        // TODO find a better way to preserve refs across remounts
+        this.observer.disconnect()
 
-      Object.keys(this.itemRefs).forEach(key => {
-        this.observer.observe(this.itemRefs[key].current)
-      })
+        Object.keys(this.itemRefs).forEach(key => {
+          this.observer.observe(this.itemRefs[key].current)
+        })
+      }
     } else {
       // Move the element here
       const isUserAction = true;
@@ -678,16 +682,20 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     const { onMoveToParent } = this.props
 
     if (onMoveToParent) {
-      onMoveToParent(gridItem, nestedId)
+      return onMoveToParent(gridItem, nestedId)
     }
+
+    return null
   }
 
   onMoveFromParent = (gridItem, nestedId) => {
     const { onMoveFromParent } = this.props
 
     if (onMoveFromParent) {
-      onMoveFromParent(gridItem, nestedId)
+      return onMoveFromParent(gridItem, nestedId)
     }
+
+    return null
   }
 
   /**
@@ -699,30 +707,6 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     if (!child || !child.key) return;
     const l = getLayoutItem(this.state.layout, String(child.key));
     if (!l) return null;
-
-    const { nested } = this.props
-    // If container grid is not nested and item has nested grid
-    if (!nested && l.nested) {
-      const nestedGrid = React.Children.only(child.props.children)
-      const nestedLayout = React.Children.map(nestedGrid.props.children, item => ({
-        ...item.props['data-grid']
-      }))
-
-      let nestedHeight = null
-      if (nestedGrid.props.autoSize) {
-        const nbRow = bottom(nestedLayout);
-        const containerPaddingY = nestedGrid.props.containerPadding
-          ? nestedGrid.props.containerPadding[1]
-          : nestedGrid.props.margin[1];
-        nestedHeight = Math.floor((
-          nbRow * nestedGrid.props.rowHeight +
-          (nbRow - 1) * nestedGrid.props.margin[1] +
-          containerPaddingY * 2
-        ) / (nestedGrid.props.rowHeight || ReactGridLayout.defaultProps.rowHeight))
-      }
-
-      l.h = nestedHeight
-    }
 
     const {
       width,
@@ -786,11 +770,11 @@ export default class ReactGridLayout extends React.Component<Props, State> {
   }
 
   render() {
-    const { id, className, style } = this.props;
+    const { id, className, style, height } = this.props;
 
     const mergedClassName = classNames("react-grid-layout", className);
     const mergedStyle = {
-      height: this.containerHeight(),
+      height: height ? `${height}px` : this.containerHeight(),
       ...style
     };
 
