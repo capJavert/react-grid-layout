@@ -173,7 +173,7 @@ class ShowcaseLayout extends React.Component {
           item.items = layout[index].items
         }
       })
-      
+
       this.setState({ layout: newLayout })
     }
   }
