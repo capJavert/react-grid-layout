@@ -295,8 +295,9 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     this.onLayoutMaybeChanged(this.state.layout, this.props.layout);
 
     // add observers to items
+    this.intersectionRoot = document.getElementById(id).parentElement
     const options = {
-      root: document.getElementById(id),
+      root: this.intersectionRoot,
       rootMargin: '0px 0px 0px 0px',
       threshold: 0.0
     }
@@ -305,16 +306,22 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     if (nested) {
       Object.keys(this.itemRefs).forEach(key => {
-        this.observer.observe(this.itemRefs[key].current)
+        if (this.itemRefs[key].current) {
+          this.observer.observe(this.itemRefs[key].current)
+        }
       })
     }
   }
 
   intersectionCallback = (entries/*, observer*/) => {
     entries.forEach(entry => {
-        if (entry.target.className.indexOf('react-draggable-dragging') > -1) {
-            this.dragItemIntersecting = entry.isIntersecting
+      if (entry.target.className.indexOf('react-draggable-dragging') > -1) {
+        this.dragItemIntersecting = entry.isIntersecting
+
+        if (!entry.isIntersecting) {
+          this.dragItemIntersectionDirection = entry.boundingClientRect.top > this.boundingClientRect.top + this.boundingClientRect.height ? 'bottom' : 'top'
         }
+      }
     })
   }
 
@@ -322,8 +329,12 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     this.observer.disconnect()
 
     Object.keys(this.itemRefs).forEach(key => {
-      this.observer.observe(this.itemRefs[key].current)
+      if (this.itemRefs[key].current) {
+        this.observer.observe(this.itemRefs[key].current)
+      }
     })
+
+    this.boundingClientRect = this.intersectionRoot.getBoundingClientRect()
   }
 
   UNSAFE_componentWillReceiveProps(nextProps: Props) {
@@ -490,13 +501,25 @@ export default class ReactGridLayout extends React.Component<Props, State> {
       const nestedCollision = collisions.find(item => item.nested)
 
       if (nestedCollision) {
+        this.setState({
+          activeDrag: null,
+          oldDragItem: null,
+          oldLayout: null
+        });
+
         const movedLayout = this.onMoveFromParent(l, nestedCollision.i)
         if (movedLayout) {
           layout = movedLayout
         }
       }
     } else if (window.shiftKeyPressed && !this.dragItemIntersecting && !l.nested) {
-      const movedLayout = this.onMoveToParent(l, id)
+      this.setState({
+        activeDrag: null,
+        oldDragItem: null,
+        oldLayout: null
+      });
+
+      const movedLayout = this.onMoveToParent(l, id, this.dragItemIntersectionDirection)
       if (movedLayout) {
         layout = movedLayout
 
@@ -507,7 +530,9 @@ export default class ReactGridLayout extends React.Component<Props, State> {
         this.observer.disconnect()
 
         Object.keys(this.itemRefs).forEach(key => {
-          this.observer.observe(this.itemRefs[key].current)
+          if (this.itemRefs[key].current) {
+            this.observer.observe(this.itemRefs[key].current)
+          }
         })
       }
     } else {
@@ -523,21 +548,21 @@ export default class ReactGridLayout extends React.Component<Props, State> {
         this.compactType(),
         cols
       );
+
+      this.props.onDragStop(layout, oldDragItem, l, null, e, node);
+
+      // Set state
+      const newLayout = compact(layout, this.compactType(), cols);
+      const { oldLayout } = this.state;
+      this.setState({
+        activeDrag: null,
+        layout: newLayout,
+        oldDragItem: null,
+        oldLayout: null
+      });
+
+      this.onLayoutMaybeChanged(newLayout, oldLayout);
     }
-
-    this.props.onDragStop(layout, oldDragItem, l, null, e, node);
-
-    // Set state
-    const newLayout = compact(layout, this.compactType(), cols);
-    const { oldLayout } = this.state;
-    this.setState({
-      activeDrag: null,
-      layout: newLayout,
-      oldDragItem: null,
-      oldLayout: null
-    });
-
-    this.onLayoutMaybeChanged(newLayout, oldLayout);
   }
 
   onLayoutMaybeChanged(newLayout: Layout, oldLayout: ?Layout) {
@@ -676,11 +701,11 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     );
   }
 
-  onMoveToParent = (gridItem, nestedId) => {
+  onMoveToParent = (gridItem, nestedId, direction) => {
     const { onMoveToParent } = this.props
 
     if (onMoveToParent) {
-      return onMoveToParent(gridItem, nestedId)
+      return onMoveToParent(gridItem, nestedId, direction)
     }
 
     return null
@@ -731,6 +756,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     return (
       <GridItem
+        className={l.nested ? 'react-grid-item-nested' : null}
         containerWidth={width}
         cols={cols}
         margin={margin}
