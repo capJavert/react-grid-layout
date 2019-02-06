@@ -312,20 +312,18 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
   intersectionCallback = (entries/*, observer*/) => {
     entries.forEach(entry => {
-      this.dragItemIntersecting = entry.isIntersecting
+        if (entry.target.className.indexOf('react-draggable-dragging') > -1) {
+            this.dragItemIntersecting = entry.isIntersecting
+        }
     })
   }
 
-  componentDidUpdate = prevProps => {
-    const { children } = this.props
+  componentDidUpdate = () => {
+    this.observer.disconnect()
 
-    if (React.Children.count(children) !== React.Children.count(prevProps.children)) {
-      this.observer.disconnect()
-
-      Object.keys(this.itemRefs).forEach(key => {
-        this.observer.observe(this.itemRefs[key].current)
-      })
-    }
+    Object.keys(this.itemRefs).forEach(key => {
+      this.observer.observe(this.itemRefs[key].current)
+    })
   }
 
   UNSAFE_componentWillReceiveProps(nextProps: Props) {

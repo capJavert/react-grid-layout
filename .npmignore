@@ -10,3 +10,4 @@ Makefile
 __tests__/
 index-dev.js
 index.html
+*.tgz
