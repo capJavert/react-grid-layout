@@ -14,7 +14,6 @@ import {
   synchronizeLayoutWithChildren,
   validateLayout,
   getAllCollisions,
-  sortLayoutItems,
   noop
 } from "./utils";
 import GridItem from "./GridItem";
@@ -478,6 +477,18 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     });
   }
 
+  elementsCollide(el1, el2) {
+    el1.offsetBottom = el1.offsetTop + el1.offsetHeight;
+    el1.offsetRight = el1.offsetLeft + el1.offsetWidth;
+    el2.offsetBottom = el2.offsetTop + el2.offsetHeight;
+    el2.offsetRight = el2.offsetLeft + el2.offsetWidth;
+
+    return !((el1.offsetBottom <= el2.offsetTop) ||
+             (el1.offsetTop >= el2.offsetBottom) ||
+             (el1.offsetRight <= el2.offsetLeft) ||
+             (el1.offsetLeft >= el2.offsetRight))
+    }
+
   /**
    * When dragging stops, figure out which position the element is closest to and update its x and y.
    * @param  {String} i Index of the child.
@@ -495,18 +506,16 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     if (window.shiftKeyPressed && !nested && !l.nested) {
       // shift key is pressed check if item should go to nested grid
-      const sorted = sortLayoutItems(layout, this.compactType());
-      const collisions = getAllCollisions(sorted, node);
-
+      const collisions = getAllCollisions(layout, { ...l, x, y });
       const nestedCollision = collisions.find(item => item.nested)
 
-      if (nestedCollision) {
-        this.setState({
-          activeDrag: null,
-          oldDragItem: null,
-          oldLayout: null
-        });
+      this.setState({
+        activeDrag: null,
+        oldDragItem: null,
+        oldLayout: null
+      });
 
+      if (nestedCollision) {
         const movedLayout = this.onMoveFromParent(l, nestedCollision.i)
         if (movedLayout) {
           layout = movedLayout

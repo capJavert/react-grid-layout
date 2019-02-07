@@ -1,6 +1,6 @@
 {
   "name": "react-grid-layout",
-  "version": "0.16.6-nested5",
+  "version": "0.16.6-nested6",
   "description": "A draggable and resizable grid layout with responsive breakpoints, for React.",
   "main": "index.js",
   "scripts": {
